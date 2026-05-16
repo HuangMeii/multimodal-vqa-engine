@@ -1,0 +1,18 @@
+{
+    "sourceFile": ".gitignore",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 0,
+            "patches": [
+                {
+                    "date": 1778940889350,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                }
+            ],
+            "date": 1778940889350,
+            "name": "Commit-0",
+            "content": "# Python\r\n__pycache__/\r\n*.py[cod]\r\n*$py.class\r\n\r\n# Virtual Environment\r\nvenv/\r\nenv/\r\n.venv/\r\n\r\n# Environment Variables\r\n.env\r\n.env.local\r\n.env.*\r\n\r\n# IDE\r\n.vscode/\r\n.idea/\r\n\r\n# Jupyter\r\n.ipynb_checkpoints/\r\n\r\n# Logs\r\nlogs/\r\n*.log\r\n\r\n# Cache\r\n.cache/\r\ncache/\r\ntmp/\r\n\r\n# OS files\r\n.DS_Store\r\nThumbs.db\r\n\r\n# Model files\r\nmodels/\r\ncheckpoints/\r\nweights/\r\n\r\n*.pt\r\n*.pth\r\n*.bin\r\n*.ckpt\r\n*.safetensors\r\n*.onnx\r\n\r\n# Dataset\r\ndatasets/\r\ndata/raw/\r\ndata/intermediate/\r\n\r\n# Label Studio exports\r\nexports/\r\nannotations/\r\n\r\n# Build\r\ndist/\r\nbuild/\r\n\r\n# Docker\r\n*.tar\r\n\r\n# Testing\r\n.pytest_cache/\r\n.coverage\r\nhtmlcov/\r\n\r\n# CUDA temp\r\n*.nvvp"
+        }
+    ]
+}

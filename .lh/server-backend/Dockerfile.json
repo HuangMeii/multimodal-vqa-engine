@@ -1,0 +1,30 @@
+{
+    "sourceFile": "server-backend/Dockerfile",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 3,
+            "patches": [
+                {
+                    "date": 1778928452574,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                },
+                {
+                    "date": 1778928605330,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,16 +1,22 @@\n-FROM python:3.10-slim\r\n+# Giai đoạn build\r\n+FROM maven:3.9.9-eclipse-temurin-21 AS build\r\n+WORKDIR /app\r\n \r\n+# Copy pom.xml trước để cache dependencies\r\n+COPY pom.xml .\r\n+RUN mvn dependency:go-offline -B\r\n+\r\n+# Copy source code và build\r\n+COPY src ./src\r\n+RUN mvn package -DskipTests\r\n+\r\n+# Giai đoạn chạy\r\n+FROM eclipse-temurin:21-jre\r\n WORKDIR /app\r\n\\ No newline at end of file\n \r\n-# Cài torch CPU (hoặc GPU nếu có NVIDIA Container Toolkit)\r\n-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu\r\n+# Copy file jar từ giai đoạn build\r\n+COPY --from=build /app/target/*.jar app.jar\r\n \r\n-COPY requirements.txt .\r\n-RUN pip install --no-cache-dir -r requirements.txt\r\n+EXPOSE 8080\r\n \r\n-COPY ./services ./services\r\n-COPY ./routers ./routers\r\n-COPY ./main.py .\r\n-\r\n-EXPOSE 8000\r\n-CMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n+ENTRYPOINT [\"java\", \"-jar\", \"app.jar\"]\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1778930535397,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,22 +1,16 @@\n-# Giai đoạn build\r\n-FROM maven:3.9.9-eclipse-temurin-21 AS build\r\n+FROM python:3.10-slim\r\n+\r\n WORKDIR /app\r\n \r\n-# Copy pom.xml trước để cache dependencies\r\n-COPY pom.xml .\r\n-RUN mvn dependency:go-offline -B\r\n+# Cài đặt các gói Python, torch CPU lấy từ pytorch.org\r\n+COPY requirements.txt .\r\n+RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu\r\n \r\n-# Copy source code và build\r\n-COPY src ./src\r\n-RUN mvn package -DskipTests\r\n+# Copy code\r\n+COPY ./services ./services\r\n+COPY ./routers ./routers\r\n+COPY ./main.py .\r\n \r\n-# Giai đoạn chạy\r\n\\ No newline at end of file\n-FROM eclipse-temurin:21-jre\r\n-WORKDIR /app\r\n+EXPOSE 8000\r\n \r\n-# Copy file jar từ giai đoạn build\r\n-COPY --from=build /app/target/*.jar app.jar\r\n-\r\n-EXPOSE 8080\r\n-\r\n-ENTRYPOINT [\"java\", \"-jar\", \"app.jar\"]\n+CMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1778930636139,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,16 +1,14 @@\n-FROM python:3.10-slim\r\n+# Giai đoạn build\r\n+FROM maven:3.9.9-eclipse-temurin-21 AS build\r\n+WORKDIR /app\r\n+COPY pom.xml .\r\n+RUN mvn dependency:go-offline -B\r\n+COPY src ./src\r\n+RUN mvn package -DskipTests\r\n \r\n+# Giai đoạn chạy\r\n+FROM eclipse-temurin:21-jre\r\n WORKDIR /app\r\n-\r\n-# Cài đặt các gói Python, torch CPU lấy từ pytorch.org\r\n-COPY requirements.txt .\r\n-RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu\r\n\\ No newline at end of file\n-\r\n-# Copy code\r\n-COPY ./services ./services\r\n-COPY ./routers ./routers\r\n-COPY ./main.py .\r\n-\r\n-EXPOSE 8000\r\n-\r\n-CMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n+COPY --from=build /app/target/*.jar app.jar\r\n+EXPOSE 8080\r\n+ENTRYPOINT [\"java\", \"-jar\", \"app.jar\"]\n\\ No newline at end of file\n"
+                }
+            ],
+            "date": 1778928452574,
+            "name": "Commit-0",
+            "content": "FROM python:3.10-slim\r\n\r\nWORKDIR /app\r\n\r\n# Cài torch CPU (hoặc GPU nếu có NVIDIA Container Toolkit)\r\nRUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu\r\n\r\nCOPY requirements.txt .\r\nRUN pip install --no-cache-dir -r requirements.txt\r\n\r\nCOPY ./services ./services\r\nCOPY ./routers ./routers\r\nCOPY ./main.py .\r\n\r\nEXPOSE 8000\r\nCMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]"
+        }
+    ]
+}

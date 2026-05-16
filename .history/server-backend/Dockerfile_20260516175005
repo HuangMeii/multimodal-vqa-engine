@@ -1,0 +1,22 @@
+# Giai đoạn build
+FROM maven:3.9.9-eclipse-temurin-21 AS build
+WORKDIR /app
+
+# Copy pom.xml trước để cache dependencies
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+
+# Copy source code và build
+COPY src ./src
+RUN mvn package -DskipTests
+
+# Giai đoạn chạy
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+
+# Copy file jar từ giai đoạn build
+COPY --from=build /app/target/*.jar app.jar
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

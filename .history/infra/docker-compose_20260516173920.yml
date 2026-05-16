@@ -1,0 +1,17 @@
+services:
+  dl-service:
+    build:
+      context: ../dl-services
+      dockerfile: Dockerfile
+    volumes:
+      - D:/vqa-models:/app/models:ro 
+      save_path = "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino"
+  # Windows: dùng đường dẫn tuyệt đối
+      # - /data/vqa-models:/app/models:ro   # Linux/Mac
+    environment:
+      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng
+      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)
+    ports:
+      - "8000:8000"
+    networks:
+      - vqa-net

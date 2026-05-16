@@ -1,0 +1,42 @@
+{
+    "sourceFile": "infra/docker-compose.yml",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 6,
+            "patches": [
+                {
+                    "date": 1778927953861,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                },
+                {
+                    "date": 1778927960730,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -4,27 +4,14 @@\n       context: ../dl-services\r\n       dockerfile: Dockerfile\r\n     volumes:\r\n       - D:/vqa-models:/app/models:ro \r\n-      services:\r\n-  dl-service:\r\n-    build:\r\n-      context: ../dl-services\r\n-      dockerfile: Dockerfile\r\n-    volumes:\r\n-      - D:/vqa-models:/app/models:ro   # Windows: dùng đường dẫn tuyệt đối\r\n+      save_path = \"D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino\"\r\n+  # Windows: dùng đường dẫn tuyệt đối\r\n       # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n     environment:\r\n       - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n       - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n     ports:\r\n       - \"8000:8000\"\r\n     networks:\r\n-      - vqa-net  # Windows: dùng đường dẫn tuyệt đối\r\n-      # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n-    environment:\r\n-      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n-      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n-    ports:\r\n-      - \"8000:8000\"\r\n-    networks:\r\n       - vqa-net\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1778928006718,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -3,9 +3,9 @@\n     build:\r\n       context: ../dl-services\r\n       dockerfile: Dockerfile\r\n     volumes:\r\n-      - D:/vqa-models:/app/models:ro \r\n+      - D:/MyData/Disk D/Thú vui lười biếng/vqa-models:/app/models:ro \r\n       save_path = \"D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino\"\r\n   # Windows: dùng đường dẫn tuyệt đối\r\n       # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n     environment:\r\n"
+                },
+                {
+                    "date": 1778928013415,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -3,11 +3,9 @@\n     build:\r\n       context: ../dl-services\r\n       dockerfile: Dockerfile\r\n     volumes:\r\n-      - D:/MyData/Disk D/Thú vui lười biếng/vqa-models:/app/models:ro \r\n-      save_path = \"D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino\"\r\n-  # Windows: dùng đường dẫn tuyệt đối\r\n+      - D:/MyData/Disk D/Thú vui lười biếng/vqa-models:/app/models:ro # Windows: dùng đường dẫn tuyệt đối\r\n       # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n     environment:\r\n       - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n       - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n"
+                },
+                {
+                    "date": 1778928531484,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -3,13 +3,29 @@\n     build:\r\n       context: ../dl-services\r\n       dockerfile: Dockerfile\r\n     volumes:\r\n-      - D:/MyData/Disk D/Thú vui lười biếng/vqa-models:/app/models:ro # Windows: dùng đường dẫn tuyệt đối\r\n-      # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n+      - D:/vqa-models:/app/models:ro\r\n     environment:\r\n-      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n-      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n+      - HF_HUB_OFFLINE=1\r\n+      - TRANSFORMERS_CACHE=/app/models\r\n     ports:\r\n\\ No newline at end of file\n       - \"8000:8000\"\r\n     networks:\r\n-      - vqa-net\n+      - vqa-net\r\n+\r\n+  server-backend:\r\n+    build:\r\n+      context: ../server-backend\r\n+      dockerfile: Dockerfile\r\n+    ports:\r\n+      - \"8080:8080\"\r\n+    environment:\r\n+      - DL_SERVICE_URL=http://dl-service:8000\r\n+    networks:\r\n+      - vqa-net\r\n+    depends_on:\r\n+      - dl-service\r\n+\r\n+networks:\r\n+  vqa-net:\r\n+    driver: bridge\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1778928537055,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -3,29 +3,13 @@\n     build:\r\n       context: ../dl-services\r\n       dockerfile: Dockerfile\r\n     volumes:\r\n-      - D:/vqa-models:/app/models:ro\r\n+      - D:/MyData/Disk D/Thú vui lười biếng/vqa-models:/app/models:ro \r\n+      # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n     environment:\r\n-      - HF_HUB_OFFLINE=1\r\n-      - TRANSFORMERS_CACHE=/app/models\r\n+      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n+      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n     ports:\r\n       - \"8000:8000\"\r\n     networks:\r\n-      - vqa-net\r\n-\r\n-  server-backend:\r\n-    build:\r\n-      context: ../server-backend\r\n-      dockerfile: Dockerfile\r\n-    ports:\r\n-      - \"8080:8080\"\r\n-    environment:\r\n-      - DL_SERVICE_URL=http://dl-service:8000\r\n-    networks:\r\n-      - vqa-net\r\n-    depends_on:\r\n-      - dl-service\r\n\\ No newline at end of file\n-\r\n-networks:\r\n-  vqa-net:\r\n-    driver: bridge\n+      - vqa-net\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1778939502747,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -2,14 +2,27 @@\n   dl-service:\r\n     build:\r\n       context: ../dl-services\r\n       dockerfile: Dockerfile\r\n-    volumes:\r\n-      - D:/MyData/Disk D/Thú vui lười biếng/vqa-models:/app/models:ro \r\n-      # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n     environment:\r\n-      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n-      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n+      - TRANSFORMERS_CACHE=/app/models\r\n     ports:\r\n       - \"8000:8000\"\r\n     networks:\r\n\\ No newline at end of file\n-      - vqa-net\n+      - vqa-net\r\n+\r\n+  server-backend:\r\n+    build:\r\n+      context: ../server-backend\r\n+      dockerfile: Dockerfile\r\n+    ports:\r\n+      - \"8080:8080\"\r\n+    environment:\r\n+      - DL_SERVICE_URL=http://dl-service:8000\r\n+    networks:\r\n+      - vqa-net\r\n+    depends_on:\r\n+      - dl-service\r\n+\r\n+networks:\r\n+  vqa-net:\r\n+    driver: bridge\r\n"
+                }
+            ],
+            "date": 1778927953861,
+            "name": "Commit-0",
+            "content": "services:\r\n  dl-service:\r\n    build:\r\n      context: ../dl-services\r\n      dockerfile: Dockerfile\r\n    volumes:\r\n      - D:/vqa-models:/app/models:ro \r\n      services:\r\n  dl-service:\r\n    build:\r\n      context: ../dl-services\r\n      dockerfile: Dockerfile\r\n    volumes:\r\n      - D:/vqa-models:/app/models:ro   # Windows: dùng đường dẫn tuyệt đối\r\n      # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n    environment:\r\n      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n    ports:\r\n      - \"8000:8000\"\r\n    networks:\r\n      - vqa-net  # Windows: dùng đường dẫn tuyệt đối\r\n      # - /data/vqa-models:/app/models:ro   # Linux/Mac\r\n    environment:\r\n      - HF_HUB_OFFLINE=1                # Bắt buộc offline, không tải từ mạng\r\n      - TRANSFORMERS_CACHE=/app/models  # Chỉ định cache (dù ta sẽ load trực tiếp)\r\n    ports:\r\n      - \"8000:8000\"\r\n    networks:\r\n      - vqa-net"
+        }
+    ]
+}

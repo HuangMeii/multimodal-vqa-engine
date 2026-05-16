@@ -1,0 +1,18 @@
+{
+    "sourceFile": "dl-services/services/t1_vision/visual_encoder.py",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 0,
+            "patches": [
+                {
+                    "date": 1778928092663,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                }
+            ],
+            "date": 1778928092663,
+            "name": "Commit-0",
+            "content": "# dl-services/services/t1_vision/visual_encoder.py\r\nfrom transformers import Blip2Processor, Blip2Model\r\nimport torch\r\nfrom PIL import Image\r\n\r\nclass BLIP2Encoder:\r\n    def __init__(self, model_path=\"/app/models/blip2\", device=None):\r\n        self.device = device or (\"cuda\" if torch.cuda.is_available() else \"cpu\")\r\n        self.processor = Blip2Processor.from_pretrained(model_path, local_files_only=True)\r\n        self.model = Blip2Model.from_pretrained(model_path, local_files_only=True, device_map=self.device)\r\n        self.model.eval()\r\n\r\n    def encode(self, image: Image.Image):\r\n        inputs = self.processor(images=image, return_tensors=\"pt\").to(self.device)\r\n        outputs = self.model.get_qformer_features(**inputs)\r\n        return outputs  # tensor (1, 32, 768)"
+        }
+    ]
+}
