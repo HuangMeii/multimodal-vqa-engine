@@ -68,3 +68,8 @@ htmlcov/
 
 # CUDA temp
 *.nvvp
+
+.history/
+.lh/
+target/
+**/target/
