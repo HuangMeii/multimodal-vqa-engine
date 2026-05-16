@@ -3,8 +3,12 @@ services:
     build:
       context: ../dl-services
       dockerfile: Dockerfile
+    container_name: dl-service-1
+    volumes:
+      - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino:/app/models/grounding-dino"
+      - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/blip2:/app/models/blip2"
     environment:
-      - TRANSFORMERS_CACHE=/app/models
+      - HF_HOME=/app/models
     ports:
       - "8000:8000"
     networks:
