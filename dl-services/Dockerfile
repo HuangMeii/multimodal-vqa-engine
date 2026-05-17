@@ -12,7 +12,7 @@ RUN pip install "numpy<2"
 # Install PyTorch 2.4.0 CPU FIRST (trước requirements để tránh accelerate kéo torch CUDA ~GB)
 RUN pip install torch==2.4.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Install requirements (transformers==4.44.0 tương thích với torch 2.4)
+# Install requirements (transformers==4.57.3 tương thích với Qwen 2.5)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

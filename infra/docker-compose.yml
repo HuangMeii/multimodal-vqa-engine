@@ -7,6 +7,7 @@ services:
     volumes:
       - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino:/app/models/grounding-dino"
       - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/blip2:/app/models/blip2"
+      - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/qwen:/app/models/qwen"
     environment:
       - HF_HOME=/app/models
     ports:

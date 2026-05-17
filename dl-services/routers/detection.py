@@ -6,11 +6,13 @@ import io
 import base64
 from services.t1_vision.object_detector import GroundingDINODetector
 from services.t1_vision.crop_utils import crop_image
+from services.t2_reasoning.qwen import QwenLLM
 
 router = APIRouter()
 
-# Khởi tạo detector toàn cục (load model 1 lần)
+# Khởi tạo model toàn cục (load model 1 lần)
 detector = GroundingDINODetector()
+qwen = QwenLLM()
 
 @router.post("/api/v1/detect")
 async def detect_objects(
@@ -55,58 +57,6 @@ async def detect_objects(
         })
     
     return {"objects": results}
-# dl-services/routers/detection.py
-
-from fastapi import APIRouter, UploadFile, File
-from PIL import Image
-import io
-from services.t1_vision.object_detector import GroundingDINODetector, Blip2Captioner
-
-router = APIRouter()
-
-# Khởi tạo model toàn cục
-detector = GroundingDINODetector()
-captioner = Blip2Captioner()
-
-@router.post("/detect")
-async def detect_objects(file: UploadFile = File(...), queries: list[str] = []):
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    detections = detector.detect(image, queries)
-    return {"detections": detections}
-
-@router.post("/caption")
-async def caption_image(file: UploadFile = File(...)):
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    caption = captioner.caption(image)
-    return {"caption": caption}
-from fastapi import APIRouter, UploadFile, File
-from PIL import Image
-import io
-from services.t1_vision.object_detector import GroundingDINODetector, Blip2Captioner
-from services.t2_reasoning.qwen import QwenLLM   # import Qwen
-
-router = APIRouter()
-
-# Khởi tạo model toàn cục
-detector = GroundingDINODetector()
-captioner = Blip2Captioner()
-qwen = QwenLLM()
-
-@router.post("/detect")
-async def detect_objects(file: UploadFile = File(...), queries: list[str] = []):
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    detections = detector.detect(image, queries)
-    return {"detections": detections}
-
-@router.post("/caption")
-async def caption_image(file: UploadFile = File(...)):
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    caption = captioner.caption(image)
-    return {"caption": caption}
 
 @router.post("/chat")
 async def chat_with_qwen(prompt: str):
