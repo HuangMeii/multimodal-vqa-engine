@@ -1,11 +1,13 @@
 # dl-services/main.py
 
 from fastapi import FastAPI
-from routers import detection
+from routers import detection, scene_graph, questions
 
-app = FastAPI(title="DL Service", version="0.2.0")
+app = FastAPI(title="DL Service", version="0.4.0")
 
 app.include_router(detection.router)
+app.include_router(scene_graph.router)
+app.include_router(questions.router)
 
 @app.get("/health")
 async def health():

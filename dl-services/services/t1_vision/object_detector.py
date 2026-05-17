@@ -23,13 +23,12 @@ class GroundingDINODetector:
         Mỗi query có dạng "a person", "a cup", v.v.
         Trả về danh sách detection.
         """
-        # Grounding DINO yêu cầu text dạng list of list: [["a cat. a dog."]]
+        # Grounding DINO yêu cầu text dạng string: "a cat. a dog."
         text = ". ".join(queries) + "."
-        text_labels = [[text]]
 
         inputs = self.processor(
             images=image,
-            text=text_labels,
+            text=text,
             return_tensors="pt"
         ).to(self.device)
 
