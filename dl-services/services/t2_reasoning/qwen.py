@@ -5,7 +5,7 @@ import torch
 class QwenLLM:
     def __init__(self, model_path="/app/models/qwen", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True, fix_mistral_regex=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path, local_files_only=True, device_map=self.device
         )
