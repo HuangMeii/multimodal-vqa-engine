@@ -5,10 +5,18 @@ services:
       dockerfile: Dockerfile
     container_name: dl-service-1
     volumes:
-      - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/grounding-dino:/app/models/grounding-dino"
-      - "D:/MyData/Disk D/Thú vui lười biếng/vqa-models/blip2:/app/models/blip2"
+      - "D:/MyData/Disk D/Mel_luoi/project/vqa-models/grounding-dino:/app/models/grounding-dino"
+      - "D:/MyData/Disk D/Mel_luoi/project/vqa-models/qwen:/app/models/qwen"
+      - "D:/MyData/Disk D/Mel_luoi/project/vqa-models/florence2:/app/models/florence2"
     environment:
       - HF_HOME=/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     ports:
       - "8000:8000"
     networks:

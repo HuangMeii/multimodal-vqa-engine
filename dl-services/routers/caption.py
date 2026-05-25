@@ -1,22 +1,35 @@
 from fastapi import APIRouter, UploadFile, File
 from PIL import Image
 import io
-from services.t1_vision.visual_encoder import BLIP2Captioner
+import torch
 
 router = APIRouter()
 
-# Khởi tạo BLIP-2 captioner (load 1 lần)
-captioner = BLIP2Captioner()
+# Lazy loading: Florence-2 chỉ load khi cần
+_captioner = None
+
+
+def get_captioner():
+    global _captioner
+    if _captioner is None:
+        from services.t1_vision.florence2_captioner import Florence2Captioner
+        _captioner = Florence2Captioner()
+    return _captioner
 
 
 @router.post("/api/v1/caption")
 async def caption_image(image: UploadFile = File(...)):
     """
-    Nhận ảnh, trả về mô tả tự nhiên bằng BLIP-2.
+    Nhận ảnh, trả về mô tả tự nhiên bằng Florence-2.
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
+    captioner = get_captioner()
     caption = captioner.generate_caption(img)
 
-    return {"caption": caption}
+    # Giải phóng VRAM
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return {"caption": caption, "model": "Florence-2-large"}

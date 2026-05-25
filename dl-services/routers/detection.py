@@ -4,13 +4,21 @@ from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
 import io
 import base64
-from services.t1_vision.object_detector import GroundingDINODetector
-from services.t1_vision.crop_utils import crop_image
+import torch
 
 router = APIRouter()
 
-# Khởi tạo detector toàn cục (load model 1 lần)
-detector = GroundingDINODetector()
+# Lazy loading: Grounding DINO chỉ load khi cần
+_detector = None
+
+
+def get_detector():
+    global _detector
+    if _detector is None:
+        from services.t1_vision.object_detector import GroundingDINODetector
+        _detector = GroundingDINODetector()
+    return _detector
+
 
 @router.post("/api/v1/detect")
 async def detect_objects(
@@ -29,13 +37,19 @@ async def detect_objects(
     query_list = [q.strip() for q in queries.split(",") if q.strip()]
     
     # Chạy detection
+    detector = get_detector()
     detections = detector.detect(img, query_list)
+    
+    # Giải phóng VRAM
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     # Xây dựng response
     results = []
     for det in detections:
         box = det['box']
         # Crop ảnh
+        from services.t1_vision.crop_utils import crop_image
         cropped = crop_image(img, box)
         # Chuyển crop sang base64
         buffered = io.BytesIO()

@@ -45,7 +45,7 @@ def test_scenegraph():
 def test_questions():
     response = client.post(
         "/api/v1/questions",
-        data={"caption": "a man holding a cup", "target_object": "cup"}
+        json={"caption": "a man holding a cup", "target_object": "cup"}
     )
     assert response.status_code == 200
     assert "question" in response.json()

@@ -1,8 +1,24 @@
 # dl-services/services/t1_vision/object_detector.py
 
+from pathlib import Path
+
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 from PIL import Image
 import torch
+
+
+def _resolve_local_model_path(model_path: str) -> str:
+    path = Path(model_path)
+    if path.is_dir() and (path / "preprocessor_config.json").exists() and (path / "config.json").exists():
+        return str(path)
+
+    if path.is_dir():
+        for candidate in path.glob("**/preprocessor_config.json"):
+            candidate_dir = candidate.parent
+            if (candidate_dir / "config.json").exists():
+                return str(candidate_dir)
+
+    return model_path
 
 
 class GroundingDINODetector:
@@ -12,9 +28,11 @@ class GroundingDINODetector:
         model_path: đường dẫn đến thư mục chứa model (grounding-dino)
         """
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        model_path = _resolve_local_model_path(model_path)
         self.processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
-            model_path, local_files_only=True, device_map=self.device
+            model_path, local_files_only=True, device_map=self.device,
+            ignore_mismatched_sizes=True
         )
 
     def detect(self, image: Image.Image, queries: list, threshold: float = 0.3, text_threshold: float = 0.2):
@@ -60,24 +78,3 @@ class GroundingDINODetector:
             })
 
         return detections
-from transformers import Blip2Processor, Blip2ForConditionalGeneration
-
-class Blip2Captioner:
-    def __init__(self, model_path="/app/models/blip2", device=None):
-        """
-        Khởi tạo BLIP-2 từ model đã download local.
-        model_path: đường dẫn đến thư mục chứa model (blip2)
-        """
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.processor = Blip2Processor.from_pretrained(model_path, local_files_only=True)
-        self.model = Blip2ForConditionalGeneration.from_pretrained(
-            model_path, local_files_only=True, device_map=self.device
-        )
-
-    def caption(self, image: Image.Image):
-        """
-        Sinh mô tả (caption) cho ảnh.
-        """
-        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
-        outputs = self.model.generate(**inputs)
-        return self.processor.decode(outputs[0], skip_special_tokens=True)

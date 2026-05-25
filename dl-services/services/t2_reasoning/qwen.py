@@ -4,13 +4,14 @@ import torch
 
 class QwenLLM:
     def __init__(self, model_path="/app/models/qwen", device=None):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        # Force CPU để tiết kiệm VRAM cho Florence-2 và Grounding DINO
+        self.device = "cpu"
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             local_files_only=True,
-            torch_dtype=torch.float16,
-            device_map=self.device
+            torch_dtype=torch.float32,
+            device_map="cpu"
         )
         self.model.eval()
 
