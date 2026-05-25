@@ -1,5 +1,5 @@
 # dl-services/routers/learn.py
-# API học tiếng Anh: 1 ảnh → nhiều caption + dịch nghĩa
+# API học tiếng Anh: 1 ảnh → Florence-2 caption + OD → TinyLlama dịch
 
 from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
@@ -10,10 +10,9 @@ import torch
 
 router = APIRouter()
 
-# Lazy loading: models chỉ được load khi cần, không load ở startup
+# Lazy loading
 _captioner = None
-_detector = None
-_llm = None
+_translator = None
 
 
 def get_captioner():
@@ -24,56 +23,154 @@ def get_captioner():
     return _captioner
 
 
-def get_detector():
-    global _detector
-    if _detector is None:
-        from services.t1_vision.object_detector import GroundingDINODetector
-        _detector = GroundingDINODetector()
-    return _detector
+def get_translator():
+    global _translator
+    if _translator is None:
+        from services.t2_reasoning.tinyllama_translator import TinyLlamaTranslator
+        _translator = TinyLlamaTranslator()
+    return _translator
 
 
-def get_llm():
-    global _llm
-    if _llm is None:
-        from services.t2_reasoning.qwen import QwenLLM
-        _llm = QwenLLM()
-    return _llm
+# Template câu tiếng Anh mẫu cho các object phổ biến
+ENGLISH_SENTENCE_TEMPLATES = {
+    "person": [
+        "There is a person in the image.",
+        "The person is standing near the {object}.",
+        "I can see a person in the picture.",
+    ],
+    "cat": [
+        "There is a cat in the image.",
+        "The cat is sitting on the {object}.",
+        "I can see a cute cat.",
+    ],
+    "dog": [
+        "There is a dog in the image.",
+        "The dog is playing near the {object}.",
+        "I can see a brown dog.",
+    ],
+    "car": [
+        "There is a car in the image.",
+        "The car is parked near the {object}.",
+        "I can see a red car.",
+    ],
+    "table": [
+        "There is a table in the image.",
+        "The {object} is on the table.",
+        "The table is made of wood.",
+    ],
+    "chair": [
+        "There is a chair in the image.",
+        "The chair is next to the {object}.",
+        "I can see a comfortable chair.",
+    ],
+    "book": [
+        "There is a book in the image.",
+        "The book is on the {object}.",
+        "I am reading an interesting book.",
+    ],
+    "phone": [
+        "There is a phone in the image.",
+        "The phone is on the {object}.",
+        "I am using my phone.",
+    ],
+    "bottle": [
+        "There is a bottle in the image.",
+        "The bottle is on the {object}.",
+        "I can see a water bottle.",
+    ],
+    "cup": [
+        "There is a cup in the image.",
+        "The cup is on the {object}.",
+        "I am drinking from a cup.",
+    ],
+    "laptop": [
+        "There is a laptop in the image.",
+        "The laptop is on the {object}.",
+        "I am working on my laptop.",
+    ],
+    "bird": [
+        "There is a bird in the image.",
+        "The bird is flying in the sky.",
+        "I can see a beautiful bird.",
+    ],
+    "tree": [
+        "There is a tree in the image.",
+        "The tree is tall and green.",
+        "The {object} is under the tree.",
+    ],
+    "flower": [
+        "There is a flower in the image.",
+        "The flower is beautiful and colorful.",
+        "The {object} is near the flower.",
+    ],
+    "ball": [
+        "There is a ball in the image.",
+        "The ball is on the {object}.",
+        "The children are playing with a ball.",
+    ],
+    "bag": [
+        "There is a bag in the image.",
+        "The bag is next to the {object}.",
+        "I carry my books in a bag.",
+    ],
+}
+
+# Template mặc định nếu object không có trong danh sách
+DEFAULT_TEMPLATES = [
+    "There is a {object} in the image.",
+    "The {object} is near the {other_object}.",
+    "I can see a {object} in the picture.",
+]
+
+
+def _get_sentence_templates(target_object: str, other_objects: list[str] = None) -> list[str]:
+    """Lấy template câu cho object, fallback về default nếu không có."""
+    obj_lower = target_object.lower()
+    other = other_objects[0] if other_objects else "table"
+
+    if obj_lower in ENGLISH_SENTENCE_TEMPLATES:
+        templates = ENGLISH_SENTENCE_TEMPLATES[obj_lower]
+    else:
+        templates = DEFAULT_TEMPLATES
+
+    # Format templates với object name
+    result = []
+    for t in templates:
+        result.append(t.replace("{object}", target_object).replace("{other_object}", other))
+    return result
 
 
 @router.post("/api/v1/detect-objects")
 async def detect_objects(image: UploadFile = File(...)):
     """
-    Bước 1: Detect objects trong ảnh bằng Grounding DINO.
+    Phát hiện vật thể trong ảnh bằng Florence-2 OD.
     Trả về danh sách objects để user chọn.
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-    # Detect với danh sách queries phổ biến
-    common_objects = [
-        "a person", "a cat", "a dog", "a car", "a table", "a chair",
-        "a book", "a phone", "a bottle", "a cup", "a laptop",
-        "a bird", "a tree", "a flower", "a ball", "a bag"
-    ]
-    detector = get_detector()
-    detections = detector.detect(img, common_objects, threshold=0.25)
+    captioner = get_captioner()
+    od_result = captioner.generate_od(img)
 
-    # Gom nhóm theo label, lấy box có score cao nhất
-    seen = {}
-    for det in detections:
-        label = det["label"]
-        if label not in seen or det["score"] > seen[label]["score"]:
-            seen[label] = det
-
+    # Parse OD result từ Florence-2
+    # Format: "cat: 0.98, dog: 0.95, person: 0.90"
     objects = []
-    for label, det in seen.items():
-        objects.append({
-            "label": label,
-            "confidence": det["score"],
-            "bbox": det["box"]
-        })
+    if od_result:
+        parts = [p.strip() for p in od_result.split(",")]
+        for part in parts:
+            if ":" in part:
+                label, score_str = part.rsplit(":", 1)
+                label = label.strip()
+                try:
+                    score = float(score_str.strip())
+                except ValueError:
+                    score = 0.5
+                objects.append({
+                    "label": label,
+                    "confidence": round(score, 4),
+                })
 
-    # Giải phóng VRAM sau Grounding DINO
+    # Giải phóng VRAM
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -86,75 +183,100 @@ async def learn_from_image(
     target_object: str = Form(""),
 ):
     """
-    Bước 2: Học tiếng Anh từ ảnh + object đã chọn.
+    Học tiếng Anh từ ảnh + object đã chọn.
     - Florence-2: sinh caption
-    - Qwen: rewrite + translate + format JSON
+    - TinyLlama: dịch câu
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-    # === 1. Florence-2: sinh nhiều caption ===
+    # === 1. Florence-2: sinh caption ===
     captioner = get_captioner()
     caption = captioner.generate_caption(img)
     detailed_caption = captioner.generate_detailed_caption(img)
-    od_result = captioner.generate_od(img)
 
     # Giải phóng VRAM sau Florence-2
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # === 2. Qwen: rewrite + translate + format ===
+    # === 2. Sinh câu tiếng Anh từ template ===
+    sentences_en = _get_sentence_templates(target_object if target_object else "scene")
 
-    prompt = f"""You are an English learning assistant. Given an image description and a target object, generate:
+    # === 3. TinyLlama: dịch câu ===
+    translator = get_translator()
+    sentences_vi = translator.translate_batch(sentences_en)
 
-1. Multiple English sentences describing the image (different grammar structures)
-2. Vietnamese translation for each sentence
-3. Key vocabulary with meanings
+    # === 4. Xây dựng vocabulary từ caption ===
+    vocabulary = _extract_vocabulary(caption, target_object)
 
-Image captions:
-- Short caption: "{caption}"
-- Detailed caption: "{detailed_caption}"
-- Objects detected: "{od_result}"
+    # === 5. Format kết quả ===
+    sentences = []
+    for en, vi in zip(sentences_en, sentences_vi):
+        sentences.append({"en": en, "vi": vi})
 
-Target object: "{target_object if target_object else 'the whole scene'}"
+    return {
+        "sentences": sentences,
+        "vocabulary": vocabulary,
+        "caption": caption,
+        "detailed_caption": detailed_caption,
+    }
 
-Output ONLY valid JSON (no markdown, no explanation):
-{{
-  "sentences": [
-    {{"en": "...", "vi": "..."}},
-    {{"en": "...", "vi": "..."}},
-    {{"en": "...", "vi": "..."}}
-  ],
-  "vocabulary": [
-    {{"word": "...", "meaning": "..."}},
-    {{"word": "...", "meaning": "..."}}
-  ]
-}}
 
-Generate 3-5 sentences with different grammar (simple present, present continuous, there is/are, preposition, adjective). Translate naturally to Vietnamese."""
+def _extract_vocabulary(caption: str, target_object: str) -> list[dict]:
+    """Trích xuất từ vựng từ caption và target object."""
+    vocab = []
 
-    llm = get_llm()
-    raw_output = llm.generate(prompt, max_new_tokens=512)
+    # Thêm target object
+    if target_object:
+        vocab.append({
+            "word": target_object,
+            "meaning": f"(đối tượng: {target_object})",
+        })
 
-    # === 3. Parse JSON từ output ===
-    try:
-        # Tìm JSON trong output (có thể bị wrap trong markdown)
-        json_match = re.search(r'\{.*\}', raw_output, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-        else:
-            result = json.loads(raw_output)
-    except (json.JSONDecodeError, AttributeError):
-        # Fallback nếu Qwen không ra JSON
-        result = {
-            "sentences": [
-                {"en": caption, "vi": f"(Tự động dịch) {caption}"}
-            ],
-            "vocabulary": []
-        }
+    # Thêm một số từ phổ biến từ caption
+    common_words = {
+        "image": "hình ảnh",
+        "picture": "bức tranh",
+        "person": "người",
+        "people": "mọi người",
+        "cat": "con mèo",
+        "dog": "con chó",
+        "car": "xe hơi",
+        "table": "cái bàn",
+        "chair": "cái ghế",
+        "book": "quyển sách",
+        "phone": "điện thoại",
+        "bottle": "cái chai",
+        "cup": "cái cốc",
+        "laptop": "máy tính xách tay",
+        "bird": "con chim",
+        "tree": "cái cây",
+        "flower": "bông hoa",
+        "ball": "quả bóng",
+        "bag": "cái túi",
+        "room": "căn phòng",
+        "house": "ngôi nhà",
+        "street": "đường phố",
+        "beautiful": "đẹp",
+        "small": "nhỏ",
+        "large": "lớn",
+        "colorful": "nhiều màu sắc",
+        "white": "màu trắng",
+        "black": "màu đen",
+        "red": "màu đỏ",
+        "blue": "màu xanh",
+        "green": "màu xanh lá",
+        "yellow": "màu vàng",
+    }
 
-    # Đảm bảo có đủ các field
-    result.setdefault("sentences", [])
-    result.setdefault("vocabulary", [])
+    caption_lower = caption.lower()
+    added_words = {target_object.lower()} if target_object else set()
 
-    return result
+    for word, meaning in common_words.items():
+        if word in caption_lower and word not in added_words:
+            vocab.append({"word": word, "meaning": meaning})
+            added_words.add(word)
+            if len(vocab) >= 8:  # Giới hạn 8 từ vựng
+                break
+
+    return vocab

@@ -24,28 +24,34 @@ def test_detect():
     response = client.post(
         "/api/v1/detect",
         files={"image": ("test.jpg", buf, "image/jpeg")},
-        data={"queries": "a person. a cup"}
+        data={"queries": "a person, a cup"}
     )
     assert response.status_code == 200
     assert "objects" in response.json()
 
-def test_scenegraph():
+def test_detect_objects():
     img = Image.new("RGB", (100, 100), color="white")
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     buf.seek(0)
     
     response = client.post(
-        "/api/v1/scenegraph",
+        "/api/v1/detect-objects",
         files={"image": ("test.jpg", buf, "image/jpeg")}
     )
     assert response.status_code == 200
-    assert "caption" in response.json()
+    assert "objects" in response.json()
 
-def test_questions():
+def test_learn():
+    img = Image.new("RGB", (100, 100), color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    buf.seek(0)
+    
     response = client.post(
-        "/api/v1/questions",
-        json={"caption": "a man holding a cup", "target_object": "cup"}
+        "/api/v1/learn",
+        files={"image": ("test.jpg", buf, "image/jpeg")},
+        data={"target_object": "cat"}
     )
     assert response.status_code == 200
-    assert "question" in response.json()
+    assert "sentences" in response.json()

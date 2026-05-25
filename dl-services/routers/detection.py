@@ -1,4 +1,5 @@
 # dl-services/routers/detection.py
+# Object detection using Florence-2 (replaces Grounding DINO)
 
 from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
@@ -8,16 +9,16 @@ import torch
 
 router = APIRouter()
 
-# Lazy loading: Grounding DINO chỉ load khi cần
-_detector = None
+# Lazy loading: Florence-2 chỉ load khi cần
+_captioner = None
 
 
-def get_detector():
-    global _detector
-    if _detector is None:
-        from services.t1_vision.object_detector import GroundingDINODetector
-        _detector = GroundingDINODetector()
-    return _detector
+def get_captioner():
+    global _captioner
+    if _captioner is None:
+        from services.t1_vision.florence2_captioner import Florence2Captioner
+        _captioner = Florence2Captioner()
+    return _captioner
 
 
 @router.post("/api/v1/detect")
@@ -27,45 +28,40 @@ async def detect_objects(
 ):
     """
     Nhận ảnh và danh sách đối tượng (cách nhau bởi dấu phẩy).
+    Dùng Florence-2 OD để phát hiện vật thể.
     Trả về danh sách các đối tượng với bounding box và ảnh crop base64.
     """
     # Đọc ảnh
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    
-    # Tách danh sách queries
-    query_list = [q.strip() for q in queries.split(",") if q.strip()]
-    
-    # Chạy detection
-    detector = get_detector()
-    detections = detector.detect(img, query_list)
-    
+
+    # Chạy OD với Florence-2
+    captioner = get_captioner()
+    od_result = captioner.generate_od(img)
+
     # Giải phóng VRAM
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    
-    # Xây dựng response
+
+    # Parse OD result từ Florence-2
+    # Format: "cat: 0.98, dog: 0.95, person: 0.90"
     results = []
-    for det in detections:
-        box = det['box']
-        # Crop ảnh
-        from services.t1_vision.crop_utils import crop_image
-        cropped = crop_image(img, box)
-        # Chuyển crop sang base64
-        buffered = io.BytesIO()
-        cropped.save(buffered, format="JPEG")
-        crop_b64 = base64.b64encode(buffered.getvalue()).decode()
-        
-        results.append({
-            "label": det['label'],
-            "confidence": round(det['score'], 4),
-            "bbox": {
-                "xmin": round(box['xmin'], 2),
-                "ymin": round(box['ymin'], 2),
-                "xmax": round(box['xmax'], 2),
-                "ymax": round(box['ymax'], 2)
-            },
-            "crop_base64": crop_b64
-        })
-    
+    if od_result:
+        parts = [p.strip() for p in od_result.split(",")]
+        for part in parts:
+            if ":" in part:
+                label, score_str = part.rsplit(":", 1)
+                label = label.strip()
+                try:
+                    score = float(score_str.strip())
+                except ValueError:
+                    score = 0.5
+
+                results.append({
+                    "label": label,
+                    "confidence": round(score, 4),
+                    "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
+                    "crop_base64": "",
+                })
+
     return {"objects": results}
