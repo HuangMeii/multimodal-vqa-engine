@@ -1,5 +1,5 @@
 # dl-services/routers/learn.py
-# API học tiếng Anh: 1 ảnh → Florence-2 caption + OD → TinyLlama dịch
+# API học tiếng Anh: 1 ảnh → Florence-2 caption + OD → TinyLlama rewrite → TinyLlama dịch
 
 from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
@@ -12,7 +12,7 @@ router = APIRouter()
 
 # Lazy loading
 _captioner = None
-_translator = None
+_rewriter = None
 
 
 def get_captioner():
@@ -23,121 +23,12 @@ def get_captioner():
     return _captioner
 
 
-def get_translator():
-    global _translator
-    if _translator is None:
+def get_rewriter():
+    global _rewriter
+    if _rewriter is None:
         from services.t2_reasoning.tinyllama_translator import TinyLlamaTranslator
-        _translator = TinyLlamaTranslator()
-    return _translator
-
-
-# Template câu tiếng Anh mẫu cho các object phổ biến
-ENGLISH_SENTENCE_TEMPLATES = {
-    "person": [
-        "There is a person in the image.",
-        "The person is standing near the {object}.",
-        "I can see a person in the picture.",
-    ],
-    "cat": [
-        "There is a cat in the image.",
-        "The cat is sitting on the {object}.",
-        "I can see a cute cat.",
-    ],
-    "dog": [
-        "There is a dog in the image.",
-        "The dog is playing near the {object}.",
-        "I can see a brown dog.",
-    ],
-    "car": [
-        "There is a car in the image.",
-        "The car is parked near the {object}.",
-        "I can see a red car.",
-    ],
-    "table": [
-        "There is a table in the image.",
-        "The {object} is on the table.",
-        "The table is made of wood.",
-    ],
-    "chair": [
-        "There is a chair in the image.",
-        "The chair is next to the {object}.",
-        "I can see a comfortable chair.",
-    ],
-    "book": [
-        "There is a book in the image.",
-        "The book is on the {object}.",
-        "I am reading an interesting book.",
-    ],
-    "phone": [
-        "There is a phone in the image.",
-        "The phone is on the {object}.",
-        "I am using my phone.",
-    ],
-    "bottle": [
-        "There is a bottle in the image.",
-        "The bottle is on the {object}.",
-        "I can see a water bottle.",
-    ],
-    "cup": [
-        "There is a cup in the image.",
-        "The cup is on the {object}.",
-        "I am drinking from a cup.",
-    ],
-    "laptop": [
-        "There is a laptop in the image.",
-        "The laptop is on the {object}.",
-        "I am working on my laptop.",
-    ],
-    "bird": [
-        "There is a bird in the image.",
-        "The bird is flying in the sky.",
-        "I can see a beautiful bird.",
-    ],
-    "tree": [
-        "There is a tree in the image.",
-        "The tree is tall and green.",
-        "The {object} is under the tree.",
-    ],
-    "flower": [
-        "There is a flower in the image.",
-        "The flower is beautiful and colorful.",
-        "The {object} is near the flower.",
-    ],
-    "ball": [
-        "There is a ball in the image.",
-        "The ball is on the {object}.",
-        "The children are playing with a ball.",
-    ],
-    "bag": [
-        "There is a bag in the image.",
-        "The bag is next to the {object}.",
-        "I carry my books in a bag.",
-    ],
-}
-
-# Template mặc định nếu object không có trong danh sách
-DEFAULT_TEMPLATES = [
-    "There is a {object} in the image.",
-    "The {object} is near the {other_object}.",
-    "I can see a {object} in the picture.",
-]
-
-
-def _get_sentence_templates(target_object: str, other_objects: list[str] = None) -> list[str]:
-    """Lấy template câu cho object, fallback về default nếu không có."""
-    obj_lower = target_object.lower()
-    other = other_objects[0] if other_objects else "table"
-
-    if obj_lower in ENGLISH_SENTENCE_TEMPLATES:
-        templates = ENGLISH_SENTENCE_TEMPLATES[obj_lower]
-    else:
-        templates = DEFAULT_TEMPLATES
-
-    # Format templates với object name
-    result = []
-    for t in templates:
-        result.append(t.replace("{object}", target_object).replace("{other_object}", other))
-    return result
+        _rewriter = TinyLlamaTranslator()
+    return _rewriter
 
 
 @router.post("/api/v1/detect-objects")
@@ -152,29 +43,82 @@ async def detect_objects(image: UploadFile = File(...)):
     captioner = get_captioner()
     od_result = captioner.generate_od(img)
 
+    print(f"[DEBUG] Florence-2 OD raw output: {repr(od_result)}")
+
     # Parse OD result từ Florence-2
-    # Format: "cat: 0.98, dog: 0.95, person: 0.90"
+    # Florence-2 OD format thực tế (với skip_special_tokens=False):
+    #   </s><s><s><s>box<loc_0><loc_0><loc_999><loc_998>cat<loc_191><loc_226><loc_753><loc_725></s>
+    # Format: label<loc_x1><loc_y1><loc_x2><loc_y2>label<loc_x1><loc_y1><loc_x2><loc_y2>...
+    # Trong đó <loc_N> là tọa độ 0-999 scale
+    # Mỗi label đi kèm với 4 <loc> ngay sau nó
     objects = []
     if od_result:
-        parts = [p.strip() for p in od_result.split(",")]
-        for part in parts:
-            if ":" in part:
-                label, score_str = part.rsplit(":", 1)
-                label = label.strip()
-                try:
-                    score = float(score_str.strip())
-                except ValueError:
-                    score = 0.5
-                objects.append({
-                    "label": label,
-                    "confidence": round(score, 4),
-                })
+        # Dùng tokenize thủ công: duyệt từng token (label hoặc <loc_N>)
+        # Pattern: ([a-zA-Z_]+|<loc_\d+>)
+        tokens = re.findall(r'[a-zA-Z_]+|<loc_\d+>', od_result)
+        current_label = None
+        current_locs = []
+        for token in tokens:
+            if token.startswith('<loc_'):
+                loc_val = int(token.replace('<loc_', '').replace('>', ''))
+                current_locs.append(loc_val)
+                if len(current_locs) == 4 and current_label:
+                    # Đã đủ 4 tọa độ, thêm object
+                    label = current_label
+                    if label.lower() not in ('od', '/od', 'obj', '/obj', 'bbox', '/bbox', ''):
+                        objects.append({
+                            "label": label,
+                            "confidence": 0.9,
+                            "bbox": {
+                                "xmin": current_locs[0],
+                                "ymin": current_locs[1],
+                                "xmax": current_locs[2],
+                                "ymax": current_locs[3],
+                            },
+                        })
+                    current_label = None
+                    current_locs = []
+            else:
+                # Đây là label
+                current_label = token
+                # Nếu còn locs dang dở từ object trước, reset
+                current_locs = []
+
+        # Fallback: nếu không có bbox, tìm label đơn thuần
+        if not objects:
+            words = re.findall(r'[a-zA-Z_][a-zA-Z\s]*', od_result)
+            for w in words:
+                w = w.strip()
+                if w and w.lower() not in ('od', 'obj', 'bbox', ''):
+                    objects.append({
+                        "label": w,
+                        "confidence": 0.9,
+                        "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
+                    })
+                    break
+
+    print(f"[DEBUG] Parsed {len(objects)} objects: {objects}")
 
     # Giải phóng VRAM
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
     return {"objects": objects}
+
+
+def _generate_sentences_from_caption(caption: str, detailed_caption: str, target_object: str) -> list[str]:
+    """Sinh 1 câu tiếng Anh từ caption thực tế của ảnh bằng TinyLlama rewrite."""
+    rewriter = get_rewriter()
+    try:
+        sentences = rewriter.rewrite_sentences(caption, detailed_caption, target_object)
+        return sentences
+    except Exception as e:
+        print(f"[WARN] TinyLlama rewrite failed: {e}, falling back to raw captions")
+        # Fallback: dùng caption gốc
+        s = detailed_caption if detailed_caption else caption
+        if not s or len(s) <= 5:
+            s = f"I can see {target_object if target_object else 'something'} in the image."
+        return [s]
 
 
 @router.post("/api/v1/learn")
@@ -184,8 +128,9 @@ async def learn_from_image(
 ):
     """
     Học tiếng Anh từ ảnh + object đã chọn.
-    - Florence-2: sinh caption
-    - TinyLlama: dịch câu
+    - Florence-2: sinh caption + object detection
+    - TinyLlama: rewrite caption thành 1 câu tiếng Anh
+    - KHÔNG dịch sang Việt ở đây (tách riêng endpoint /api/v1/translate)
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -199,20 +144,16 @@ async def learn_from_image(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # === 2. Sinh câu tiếng Anh từ template ===
-    sentences_en = _get_sentence_templates(target_object if target_object else "scene")
+    # === 2. TinyLlama: rewrite caption thành 1 câu tiếng Anh ===
+    sentences_en = _generate_sentences_from_caption(
+        caption, detailed_caption, target_object
+    )
 
-    # === 3. TinyLlama: dịch câu ===
-    translator = get_translator()
-    sentences_vi = translator.translate_batch(sentences_en)
-
-    # === 4. Xây dựng vocabulary từ caption ===
+    # === 3. Xây dựng vocabulary từ caption ===
     vocabulary = _extract_vocabulary(caption, target_object)
 
-    # === 5. Format kết quả ===
-    sentences = []
-    for en, vi in zip(sentences_en, sentences_vi):
-        sentences.append({"en": en, "vi": vi})
+    # === 4. Format kết quả (chỉ tiếng Anh, chưa dịch) ===
+    sentences = [{"en": s, "vi": ""} for s in sentences_en]
 
     return {
         "sentences": sentences,
@@ -220,6 +161,41 @@ async def learn_from_image(
         "caption": caption,
         "detailed_caption": detailed_caption,
     }
+
+
+@router.post("/api/v1/translate")
+async def translate_text(
+    texts: str = Form(...),
+):
+    """
+    Dịch câu tiếng Anh sang tiếng Việt bằng TinyLlama.
+    Nhận vào JSON array các câu tiếng Anh, trả về JSON array các câu đã dịch.
+
+    Args:
+        texts: JSON string của list[string] các câu tiếng Anh
+               Ví dụ: '["I can see a cat.", "The cat is sitting on the table."]'
+
+    Returns:
+        {"translations": ["Tôi có thể thấy một con mèo.", "Con mèo đang ngồi trên bàn."]}
+    """
+    # Parse input
+    try:
+        sentences_en = json.loads(texts)
+        if not isinstance(sentences_en, list):
+            sentences_en = [sentences_en]
+    except (json.JSONDecodeError, TypeError):
+        sentences_en = [texts]
+
+    # === TinyLlama: dịch câu Anh → Việt ===
+    rewriter = get_rewriter()
+    sentences_vi = []
+    try:
+        sentences_vi = rewriter.translate_batch(sentences_en)
+    except Exception as e:
+        print(f"[WARN] TinyLlama translation failed: {e}")
+        sentences_vi = sentences_en[:]  # fallback: giữ nguyên tiếng Anh
+
+    return {"translations": sentences_vi}
 
 
 def _extract_vocabulary(caption: str, target_object: str) -> list[dict]:

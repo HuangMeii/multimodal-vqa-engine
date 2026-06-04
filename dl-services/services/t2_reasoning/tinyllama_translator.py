@@ -80,3 +80,59 @@ English: {text}
             translated = self.translate(sentence, target_lang)
             results.append(translated)
         return results
+
+    def rewrite_sentences(self, caption: str, detailed_caption: str, target_object: str = "") -> list[str]:
+        """
+        Dùng TinyLlama để rewrite caption thành 1 câu tiếng Anh,
+        phù hợp với ngữ cảnh thực tế của ảnh.
+
+        Args:
+            caption: Caption ngắn từ Florence-2
+            detailed_caption: Caption chi tiết từ Florence-2
+            target_object: Object người dùng chọn để học (có thể rỗng)
+
+        Returns:
+            list[str]: 1 câu tiếng Anh
+        """
+        object_hint = f' focusing on the object "{target_object}"' if target_object else ""
+
+        prompt = f"""Given an image caption, rewrite it into 1 natural English sentence for learning English{object_hint}.
+
+Caption: {detailed_caption if detailed_caption else caption}
+
+Output exactly 1 sentence:"""
+
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=128,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+
+        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Extract the generated part after the prompt
+        if prompt in response:
+            generated = response[len(prompt):].strip()
+        else:
+            generated = response.strip()
+
+        # Parse 1 sentence
+        sentence = generated.split("\n")[0].strip()
+        # Remove numbering like "1." if present
+        sentence = re.sub(r'^\d+\.\s*', '', sentence)
+
+        # Fallback if empty
+        if not sentence or len(sentence) <= 5:
+            if target_object:
+                sentence = f"I can see {target_object} in the image."
+            else:
+                sentence = f"I can see something in the image."
+
+        return [sentence]

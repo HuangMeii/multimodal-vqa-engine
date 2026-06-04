@@ -98,6 +98,8 @@ class Florence2Captioner:
                 top_p=None,
             )
 
-        result = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        # Decode WITHOUT skip_special_tokens để giữ lại các token <od>, <obj>, <bbox>
+        result = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+        # Remove the task prompt
         result = result.replace(task_prompt, "").strip()
         return result

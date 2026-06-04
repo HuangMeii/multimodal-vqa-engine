@@ -44,24 +44,42 @@ async def detect_objects(
         torch.cuda.empty_cache()
 
     # Parse OD result từ Florence-2
-    # Format: "cat: 0.98, dog: 0.95, person: 0.90"
+    # Florence-2 OD format: <od> <obj1> <bbox ...> label(score) </obj1> ... </od>
+    # Hoặc: label(0.98), label(0.95)
     results = []
     if od_result:
-        parts = [p.strip() for p in od_result.split(",")]
-        for part in parts:
-            if ":" in part:
-                label, score_str = part.rsplit(":", 1)
-                label = label.strip()
-                try:
-                    score = float(score_str.strip())
-                except ValueError:
-                    score = 0.5
+        # Try Florence-2 format: label(score)
+        import re
+        matches = re.findall(r'(\w[\w\s]*?)\(([0-9.]+)\)', od_result)
+        for label, score_str in matches:
+            label = label.strip()
+            try:
+                score = float(score_str)
+            except ValueError:
+                score = 0.5
+            results.append({
+                "label": label,
+                "confidence": round(score, 4),
+                "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
+                "crop_base64": "",
+            })
 
-                results.append({
-                    "label": label,
-                    "confidence": round(score, 4),
-                    "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
-                    "crop_base64": "",
-                })
+        # Fallback: try "label: score" format
+        if not results:
+            parts = [p.strip() for p in od_result.split(",")]
+            for part in parts:
+                if ":" in part:
+                    label, score_str = part.rsplit(":", 1)
+                    label = label.strip()
+                    try:
+                        score = float(score_str.strip())
+                    except ValueError:
+                        score = 0.5
+                    results.append({
+                        "label": label,
+                        "confidence": round(score, 4),
+                        "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
+                        "crop_base64": "",
+                    })
 
     return {"objects": results}
