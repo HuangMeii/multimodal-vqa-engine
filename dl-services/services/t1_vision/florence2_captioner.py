@@ -1,105 +1,187 @@
 # dl-services/services/t1_vision/florence2_captioner.py
-from pathlib import Path
+"""Vision wrapper for realtime backend.
 
-from transformers import AutoProcessor, AutoModelForCausalLM
+The class name stays for compatibility with existing imports, but the
+implementation now uses YOLOv8 for detection and BLIP for captioning.
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import os
+from pathlib import Path
+from typing import Iterable
+
 import torch
 from PIL import Image
 
 
-def _resolve_local_model_path(model_path: str) -> str:
-    path = Path(model_path)
-    if path.is_dir() and (path / "preprocessor_config.json").exists() and (path / "config.json").exists():
+def _resolve_model_ref(model_ref: str | None, fallback: str) -> str:
+    if not model_ref:
+        return fallback
+
+    path = Path(model_ref)
+    if path.exists():
         return str(path)
 
-    if path.is_dir():
-        for candidate in path.glob("**/preprocessor_config.json"):
-            candidate_dir = candidate.parent
-            if (candidate_dir / "config.json").exists():
-                return str(candidate_dir)
+    return model_ref
 
-    return model_path
+
+def _image_to_base64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
 class Florence2Captioner:
-    def __init__(self, model_path="/app/models/florence2", device=None):
+    def __init__(
+        self,
+        yolo_model_path: str | None = None,
+        caption_model_path: str | None = None,
+        device: str | None = None,
+        detector=None,
+        processor=None,
+        caption_model=None,
+    ):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        model_path = _resolve_local_model_path(model_path)
-        self.processor = AutoProcessor.from_pretrained(
-            model_path, trust_remote_code=True, local_files_only=True
+        self.yolo_model_path = _resolve_model_ref(
+            yolo_model_path or os.getenv("YOLOV8_MODEL_PATH"),
+            fallback="yolov8n.pt",
         )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            local_files_only=True,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map=self.device,
+        self.caption_model_path = _resolve_model_ref(
+            caption_model_path or os.getenv("TINYBLIP_MODEL_PATH"),
+            fallback="Salesforce/blip-image-captioning-base",
         )
-        self.model.eval()
+        self.confidence = float(os.getenv("YOLOV8_CONFIDENCE", "0.25"))
+        self.max_det = int(os.getenv("YOLOV8_MAX_DET", "10"))
 
-    def _prepare_inputs(self, image: Image.Image, task_prompt: str):
-        """Chuẩn bị inputs, ép kiểu pixel_values về cùng dtype với model."""
-        inputs = self.processor(text=task_prompt, images=image, return_tensors="pt").to(self.device)
-        # Ép kiểu pixel_values về cùng dtype với model để tránh lỗi
-        # "Input type (float) and bias type (c10::Half) should be the same"
-        model_dtype = next(self.model.parameters()).dtype
-        inputs["pixel_values"] = inputs["pixel_values"].to(dtype=model_dtype)
-        return inputs
+        self._detector = detector
+        self._processor = processor
+        self._caption_model = caption_model
+
+    def _get_detector(self):
+        if self._detector is None:
+            from ultralytics import YOLO
+
+            self._detector = YOLO(self.yolo_model_path)
+        return self._detector
+
+    def _get_processor(self):
+        if self._processor is None:
+            from transformers import BlipProcessor
+
+            self._processor = BlipProcessor.from_pretrained(self.caption_model_path)
+        return self._processor
+
+    def _get_caption_model(self):
+        if self._caption_model is None:
+            from transformers import BlipForConditionalGeneration
+
+            torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+            self._caption_model = BlipForConditionalGeneration.from_pretrained(
+                self.caption_model_path,
+                local_files_only=False,
+                torch_dtype=torch_dtype,
+            )
+            self._caption_model.to(self.device)
+            self._caption_model.eval()
+        return self._caption_model
+
+    def _run_caption(self, image: Image.Image, prompt: str, max_new_tokens: int) -> str:
+        processor = self._get_processor()
+        model = self._get_caption_model()
+
+        inputs = processor(images=image, text=prompt, return_tensors="pt")
+        inputs = {key: value.to(self.device) for key, value in inputs.items()}
+
+        with torch.no_grad():
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                num_beams=1,
+                do_sample=False,
+            )
+
+        caption = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        return caption.replace(prompt, "").strip()
 
     def generate_caption(self, image: Image.Image) -> str:
-        task_prompt = "<CAPTION>"
-        inputs = self._prepare_inputs(image, task_prompt)
-
-        with torch.no_grad():
-            generated_ids = self.model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=50,
-                num_beams=1,
-                do_sample=False,
-                temperature=None,
-                top_p=None,
-            )
-
-        caption = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        caption = caption.replace(task_prompt, "").strip()
-        return caption
+        return self._run_caption(image, prompt="a photo of", max_new_tokens=40)
 
     def generate_detailed_caption(self, image: Image.Image) -> str:
-        task_prompt = "<DETAILED_CAPTION>"
-        inputs = self._prepare_inputs(image, task_prompt)
+        return self._run_caption(
+            image,
+            prompt="Describe the image in detail.",
+            max_new_tokens=80,
+        )
 
-        with torch.no_grad():
-            generated_ids = self.model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=200,
-                num_beams=1,
-                do_sample=False,
-                temperature=None,
-                top_p=None,
+    def _normalize_requested_labels(self, queries: str | Iterable[str] | None) -> set[str]:
+        if queries is None:
+            return set()
+        if isinstance(queries, str):
+            parts = [part.strip().lower() for part in queries.split(",")]
+            return {part for part in parts if part}
+        return {str(part).strip().lower() for part in queries if str(part).strip()}
+
+    def detect_objects(self, image: Image.Image, queries: str | Iterable[str] | None = None) -> list[dict]:
+        detector = self._get_detector()
+        requested_labels = self._normalize_requested_labels(queries)
+
+        results = detector.predict(
+            source=image,
+            conf=self.confidence,
+            device=self.device,
+            verbose=False,
+            max_det=self.max_det,
+        )
+
+        if not results:
+            return []
+
+        result = results[0]
+        detections: list[dict] = []
+        names = getattr(result, "names", None) or getattr(detector, "names", {})
+
+        for box in getattr(result, "boxes", []):
+            cls_id = int(box.cls.item()) if hasattr(box, "cls") else -1
+            if isinstance(names, dict):
+                label = names.get(cls_id, f"class_{cls_id}")
+            elif isinstance(names, list) and 0 <= cls_id < len(names):
+                label = names[cls_id]
+            else:
+                label = f"class_{cls_id}"
+
+            if requested_labels and label.lower() not in requested_labels:
+                continue
+
+            confidence = float(box.conf.item()) if hasattr(box, "conf") else 0.0
+            x1, y1, x2, y2 = [int(round(v)) for v in box.xyxy[0].tolist()]
+            x1 = max(x1, 0)
+            y1 = max(y1, 0)
+            x2 = max(x2, x1)
+            y2 = max(y2, y1)
+
+            crop_base64 = ""
+            if x2 > x1 and y2 > y1:
+                crop = image.crop((x1, y1, x2, y2))
+                crop_base64 = _image_to_base64(crop)
+
+            detections.append(
+                {
+                    "label": label,
+                    "confidence": round(confidence, 4),
+                    "bbox": {
+                        "xmin": x1,
+                        "ymin": y1,
+                        "xmax": x2,
+                        "ymax": y2,
+                    },
+                    "crop_base64": crop_base64,
+                }
             )
 
-        caption = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        caption = caption.replace(task_prompt, "").strip()
-        return caption
+        return detections
 
-    def generate_od(self, image: Image.Image) -> str:
-        task_prompt = "<OD>"
-        inputs = self._prepare_inputs(image, task_prompt)
-
-        with torch.no_grad():
-            generated_ids = self.model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=200,
-                num_beams=1,
-                do_sample=False,
-                temperature=None,
-                top_p=None,
-            )
-
-        # Decode WITHOUT skip_special_tokens để giữ lại các token <od>, <obj>, <bbox>
-        result = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        # Remove the task prompt
-        result = result.replace(task_prompt, "").strip()
-        return result
+    def generate_od(self, image: Image.Image, queries: str | Iterable[str] | None = None) -> list[dict]:
+        return self.detect_objects(image, queries=queries)

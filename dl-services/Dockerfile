@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --upgrade pip
 RUN pip install "numpy<2"
 
-# Install PyTorch 2.4.0 with CUDA 12.1 support
-RUN pip install torch==2.4.0+cu121 torchvision==0.19.0+cu121 torchaudio==2.4.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+# Install CPU PyTorch for realtime CPU backend
+RUN pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cpu
 
 # Install requirements
 COPY requirements.txt .

@@ -16,11 +16,11 @@ Hệ thống trả lời câu hỏi trực quan (VQA) gồm 3 tầng: **Flutter 
                      ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  DL Service (FastAPI - Python) — port 8000                       │
-│  Chứa các model AI: Grounding DINO, Florence-2, Qwen            │
+│  Chứa các model AI: YOLOv8, TinyBLIP, TinyLlama, Qwen           │
 │  Router endpoints:                                               │
-│    • POST /api/v1/detect           → GroundingDINODetector       │
-│    • POST /api/v1/caption          → Florence2Captioner          │
-│    • POST /api/v1/scenegraph       → Florence2Captioner          │
+│    • POST /api/v1/detect           → YOLOv8 detector             │
+│    • POST /api/v1/caption          → Vision caption wrapper      │
+│    • POST /api/v1/scenegraph       → Vision caption wrapper      │
 │    • POST /api/v1/questions        → QwenLLM                     │
 │    • POST /api/v1/florence2/caption                               │
 │    • POST /api/v1/florence2/detailed-caption                      │
@@ -54,7 +54,7 @@ vqa-system/
 │   ├── services/
 │   │   ├── t1_vision/              # Tầng thị giác
 │   │   │   ├── object_detector.py  # Grounding DINO
-│   │   │   ├── florence2_captioner.py  # Florence-2
+│   │   │   ├── florence2_captioner.py  # Compatibility adapter → YOLOv8 + TinyBLIP
 │   │   │   ├── visual_encoder.py   # BLIP-2 (dự phòng)
 │   │   │   └── crop_utils.py       # Crop ảnh theo bbox
 │   │   └── t2_reasoning/           # Tầng suy luận
@@ -91,13 +91,13 @@ vqa-system/
 | Output | `{ "objects": [{"label","confidence","bbox","crop_base64"}] }` |
 | Endpoint | `POST /api/v1/detect` |
 
-### 2. Florence-2 — Captioning & Scene Graph
+### 2. YOLOv8 + TinyBLIP — Detection & Captioning
 | Mục | Chi tiết |
 |------|---------|
 | File | `services/t1_vision/florence2_captioner.py` |
-| Model path | `/app/models/florence2` |
-| Tasks | `<CAPTION>`, `<DETAILED_CAPTION>`, `<OD>` |
-| Endpoints | `POST /api/v1/caption`, `/scenegraph`, `/florence2/*` |
+| Model path | `/app/models` + HF model ids |
+| Tasks | YOLOv8 detect + BLIP caption + YOLOv8 compat route |
+| Endpoints | `POST /api/v1/detect`, `/learn`, `/florence2/*` |
 
 ### 3. Qwen — Question Generation
 | Mục | Chi tiết |
@@ -140,15 +140,17 @@ defaultValue: 'http://10.0.2.2:8000'   // Android emulator → host localhost
 
 | Service | Image Base | Port | GPU | Mô tả |
 |---------|-----------|------|-----|-------|
-| `dl-service` | `python:3.10-slim` | `8000:8000` | ✅ NVIDIA | FastAPI + Models |
+| `dl-service` | `python:3.10-slim` | `8000:8000` | ❌ CPU (default) | FastAPI + Models (YOLOv8 + TinyBLIP) |
 | `server-backend` | `eclipse-temurin:21-jre` | `8080:8080` | ❌ | Spring Boot proxy |
 
 ### Volume Mounts
 
 ```yaml
-vqa-models/grounding-dino → /app/models/grounding-dino  (local_files_only)
-vqa-models/qwen           → /app/models/qwen            (local_files_only)
-vqa-models/florence2      → /app/models/florence2       (local_files_only)
+vqa-models/yolov8        → /app/models/yolov8         (YOLOv8 weights / exports)
+vqa-models/tinyblip      → /app/models/tinyblip       (TinyBLIP weights / cache)
+vqa-models/grounding-dino→ /app/models/grounding-dino (legacy)
+vqa-models/qwen          → /app/models/qwen           (legacy)
+vqa-models               → /app/models                (HF cache + optional local weights)
 ```
 
 ### Network
@@ -165,6 +167,8 @@ Cả 2 service nằm trong `vqa-net` (bridge). Server Backend gọi DL Service q
 cd vqa-system/infra
 docker-compose up --build -d
 ```
+
+Before starting containers, ensure model folders exist under `vqa-models/` (e.g. `yolov8`, `tinyblip`). If not present, the DL Service will start but vision endpoints may return errors until models are provided or downloaded.
 
 Kiểm tra:
 ```bash
@@ -203,13 +207,13 @@ adb reverse tcp:8000 tcp:8000
 | Method | Path | Mô tả |
 |--------|------|-------|
 | GET | `/health` | Health check |
-| POST | `/api/v1/detect` | Object detection (Grounding DINO) |
-| POST | `/api/v1/caption` | Caption ảnh (Florence-2) |
-| POST | `/api/v1/scenegraph` | Scene graph (Florence-2 detailed caption) |
+| POST | `/api/v1/detect` | Object detection (YOLOv8) |
+| POST | `/api/v1/caption` | Caption ảnh (YOLOv8 + TinyBLIP) |
+| POST | `/api/v1/scenegraph` | Scene graph (YOLOv8 + TinyBLIP detailed caption) |
 | POST | `/api/v1/questions` | Sinh câu hỏi (Qwen) |
-| POST | `/api/v1/florence2/caption` | Florence-2 caption |
-| POST | `/api/v1/florence2/detailed-caption` | Florence-2 detailed caption |
-| POST | `/api/v1/florence2/od` | Florence-2 object detection |
+| POST | `/api/v1/florence2/caption` | TinyBLIP caption (compat route) |
+| POST | `/api/v1/florence2/detailed-caption` | TinyBLIP detailed caption (compat route) |
+| POST | `/api/v1/florence2/od` | YOLOv8 object detection (compat route) |
 
 ### Server Backend (port 8080)
 

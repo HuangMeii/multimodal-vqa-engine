@@ -5,10 +5,12 @@ services:
       dockerfile: Dockerfile
     container_name: dl-service-1
     volumes:
-      - "D:/MyData/Disk D/Mel_luoi/project/vqa-models/florence2:/app/models/florence2"
+      - "D:/MyData/Disk D/Mel_luoi/project/vqa-models:/app/models"
       - "D:/MyData/Disk D/Mel_luoi/project/vqa-models/tinyllama:/app/models/tinyllama"
     environment:
-      - HF_HOME=/app/models
+      - HF_HOME=/app/models/hf
+      - YOLOV8_MODEL_PATH=/app/models/yolov8n.pt
+      - TINYBLIP_MODEL_ID=Salesforce/blip-image-captioning-base
     deploy:
       resources:
         reservations:

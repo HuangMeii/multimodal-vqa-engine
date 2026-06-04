@@ -1,5 +1,5 @@
 # dl-services/routers/detection.py
-# Object detection using Florence-2 (replaces Grounding DINO)
+# Object detection using YOLOv8.
 
 from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
@@ -9,7 +9,7 @@ import torch
 
 router = APIRouter()
 
-# Lazy loading: Florence-2 chỉ load khi cần
+# Lazy loading: YOLOv8 chỉ load khi cần
 _captioner = None
 
 
@@ -28,58 +28,19 @@ async def detect_objects(
 ):
     """
     Nhận ảnh và danh sách đối tượng (cách nhau bởi dấu phẩy).
-    Dùng Florence-2 OD để phát hiện vật thể.
+    Dùng YOLOv8 để phát hiện vật thể.
     Trả về danh sách các đối tượng với bounding box và ảnh crop base64.
     """
     # Đọc ảnh
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-    # Chạy OD với Florence-2
+    # Chạy OD với YOLOv8
     captioner = get_captioner()
-    od_result = captioner.generate_od(img)
+    od_result = captioner.detect_objects(img, queries=queries)
 
     # Giải phóng VRAM
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Parse OD result từ Florence-2
-    # Florence-2 OD format: <od> <obj1> <bbox ...> label(score) </obj1> ... </od>
-    # Hoặc: label(0.98), label(0.95)
-    results = []
-    if od_result:
-        # Try Florence-2 format: label(score)
-        import re
-        matches = re.findall(r'(\w[\w\s]*?)\(([0-9.]+)\)', od_result)
-        for label, score_str in matches:
-            label = label.strip()
-            try:
-                score = float(score_str)
-            except ValueError:
-                score = 0.5
-            results.append({
-                "label": label,
-                "confidence": round(score, 4),
-                "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
-                "crop_base64": "",
-            })
-
-        # Fallback: try "label: score" format
-        if not results:
-            parts = [p.strip() for p in od_result.split(",")]
-            for part in parts:
-                if ":" in part:
-                    label, score_str = part.rsplit(":", 1)
-                    label = label.strip()
-                    try:
-                        score = float(score_str.strip())
-                    except ValueError:
-                        score = 0.5
-                    results.append({
-                        "label": label,
-                        "confidence": round(score, 4),
-                        "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
-                        "crop_base64": "",
-                    })
-
-    return {"objects": results}
+    return {"objects": od_result or [], "model": "YOLOv8"}

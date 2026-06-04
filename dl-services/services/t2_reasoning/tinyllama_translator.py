@@ -81,7 +81,13 @@ English: {text}
             results.append(translated)
         return results
 
-    def rewrite_sentences(self, caption: str, detailed_caption: str, target_object: str = "") -> list[str]:
+    def rewrite_sentences(
+        self,
+        caption: str,
+        detailed_caption: str,
+        target_object: str = "",
+        detected_objects: list[dict] | None = None,
+    ) -> list[str]:
         """
         Dùng TinyLlama để rewrite caption thành 1 câu tiếng Anh,
         phù hợp với ngữ cảnh thực tế của ảnh.
@@ -95,12 +101,24 @@ English: {text}
             list[str]: 1 câu tiếng Anh
         """
         object_hint = f' focusing on the object "{target_object}"' if target_object else ""
+        detection_hint = ""
+        if detected_objects:
+            labels = []
+            for item in detected_objects:
+                label = str(item.get("label", "")).strip()
+                if label and label.lower() not in {entry.lower() for entry in labels}:
+                    labels.append(label)
+            if labels:
+                detection_hint = f" Detected objects: {', '.join(labels[:6])}."
 
         prompt = f"""Given an image caption, rewrite it into 1 natural English sentence for learning English{object_hint}.
 
 Caption: {detailed_caption if detailed_caption else caption}
+detection_hint
 
 Output exactly 1 sentence:"""
+
+        prompt = prompt.replace("\ndetection_hint", detection_hint)
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
 

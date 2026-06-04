@@ -20,7 +20,7 @@ def get_captioner():
 @router.post("/api/v1/florence2/caption")
 async def florence2_caption(image: UploadFile = File(...)):
     """
-    Nhận ảnh, trả về caption tổng quát bằng Florence-2 (<CAPTION>).
+    Nhận ảnh, trả về caption tổng quát bằng TinyBLIP.
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -31,13 +31,13 @@ async def florence2_caption(image: UploadFile = File(...)):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return {"caption": caption, "model": "Florence-2-large"}
+    return {"caption": caption, "model": "YOLOv8 + TinyBLIP"}
 
 
 @router.post("/api/v1/florence2/detailed-caption")
 async def florence2_detailed_caption(image: UploadFile = File(...)):
     """
-    Nhận ảnh, trả về caption chi tiết bằng Florence-2 (<DETAILED_CAPTION>).
+    Nhận ảnh, trả về caption chi tiết bằng TinyBLIP.
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -48,21 +48,21 @@ async def florence2_detailed_caption(image: UploadFile = File(...)):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return {"caption": caption, "model": "Florence-2-large"}
+    return {"caption": caption, "model": "YOLOv8 + TinyBLIP"}
 
 
 @router.post("/api/v1/florence2/od")
 async def florence2_object_detection(image: UploadFile = File(...)):
     """
-    Nhận ảnh, trả về kết quả object detection bằng Florence-2 (<OD>).
+    Nhận ảnh, trả về kết quả object detection bằng YOLOv8.
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
     captioner = get_captioner()
-    result = captioner.generate_od(img)
+    result = captioner.detect_objects(img)
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return {"objects": result, "model": "Florence-2-large"}
+    return {"objects": result, "model": "YOLOv8 + TinyBLIP"}

@@ -1,5 +1,5 @@
 # dl-services/routers/learn.py
-# API học tiếng Anh: 1 ảnh → Florence-2 caption + OD → TinyLlama rewrite → TinyLlama dịch
+# API học tiếng Anh: 1 ảnh → YOLOv8 detect + TinyBLIP caption + TinyLlama rewrite → TinyLlama dịch
 
 from fastapi import APIRouter, UploadFile, File, Form
 from PIL import Image
@@ -34,68 +34,16 @@ def get_rewriter():
 @router.post("/api/v1/detect-objects")
 async def detect_objects(image: UploadFile = File(...)):
     """
-    Phát hiện vật thể trong ảnh bằng Florence-2 OD.
+    Phát hiện vật thể trong ảnh bằng YOLOv8.
     Trả về danh sách objects để user chọn.
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
     captioner = get_captioner()
-    od_result = captioner.generate_od(img)
+    od_result = captioner.detect_objects(img)
 
-    print(f"[DEBUG] Florence-2 OD raw output: {repr(od_result)}")
-
-    # Parse OD result từ Florence-2
-    # Florence-2 OD format thực tế (với skip_special_tokens=False):
-    #   </s><s><s><s>box<loc_0><loc_0><loc_999><loc_998>cat<loc_191><loc_226><loc_753><loc_725></s>
-    # Format: label<loc_x1><loc_y1><loc_x2><loc_y2>label<loc_x1><loc_y1><loc_x2><loc_y2>...
-    # Trong đó <loc_N> là tọa độ 0-999 scale
-    # Mỗi label đi kèm với 4 <loc> ngay sau nó
-    objects = []
-    if od_result:
-        # Dùng tokenize thủ công: duyệt từng token (label hoặc <loc_N>)
-        # Pattern: ([a-zA-Z_]+|<loc_\d+>)
-        tokens = re.findall(r'[a-zA-Z_]+|<loc_\d+>', od_result)
-        current_label = None
-        current_locs = []
-        for token in tokens:
-            if token.startswith('<loc_'):
-                loc_val = int(token.replace('<loc_', '').replace('>', ''))
-                current_locs.append(loc_val)
-                if len(current_locs) == 4 and current_label:
-                    # Đã đủ 4 tọa độ, thêm object
-                    label = current_label
-                    if label.lower() not in ('od', '/od', 'obj', '/obj', 'bbox', '/bbox', ''):
-                        objects.append({
-                            "label": label,
-                            "confidence": 0.9,
-                            "bbox": {
-                                "xmin": current_locs[0],
-                                "ymin": current_locs[1],
-                                "xmax": current_locs[2],
-                                "ymax": current_locs[3],
-                            },
-                        })
-                    current_label = None
-                    current_locs = []
-            else:
-                # Đây là label
-                current_label = token
-                # Nếu còn locs dang dở từ object trước, reset
-                current_locs = []
-
-        # Fallback: nếu không có bbox, tìm label đơn thuần
-        if not objects:
-            words = re.findall(r'[a-zA-Z_][a-zA-Z\s]*', od_result)
-            for w in words:
-                w = w.strip()
-                if w and w.lower() not in ('od', 'obj', 'bbox', ''):
-                    objects.append({
-                        "label": w,
-                        "confidence": 0.9,
-                        "bbox": {"xmin": 0, "ymin": 0, "xmax": 0, "ymax": 0},
-                    })
-                    break
+    objects = od_result or []
 
     print(f"[DEBUG] Parsed {len(objects)} objects: {objects}")
 
@@ -106,11 +54,21 @@ async def detect_objects(image: UploadFile = File(...)):
     return {"objects": objects}
 
 
-def _generate_sentences_from_caption(caption: str, detailed_caption: str, target_object: str) -> list[str]:
+def _generate_sentences_from_caption(
+    caption: str,
+    detailed_caption: str,
+    target_object: str,
+    detected_objects: list[dict] | None = None,
+) -> list[str]:
     """Sinh 1 câu tiếng Anh từ caption thực tế của ảnh bằng TinyLlama rewrite."""
     rewriter = get_rewriter()
     try:
-        sentences = rewriter.rewrite_sentences(caption, detailed_caption, target_object)
+        sentences = rewriter.rewrite_sentences(
+            caption,
+            detailed_caption,
+            target_object,
+            detected_objects=detected_objects,
+        )
         return sentences
     except Exception as e:
         print(f"[WARN] TinyLlama rewrite failed: {e}, falling back to raw captions")
@@ -128,29 +86,34 @@ async def learn_from_image(
 ):
     """
     Học tiếng Anh từ ảnh + object đã chọn.
-    - Florence-2: sinh caption + object detection
+    - YOLOv8: object detection
+    - TinyBLIP: sinh caption + detailed caption
     - TinyLlama: rewrite caption thành 1 câu tiếng Anh
     - KHÔNG dịch sang Việt ở đây (tách riêng endpoint /api/v1/translate)
     """
     img_bytes = await image.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-    # === 1. Florence-2: sinh caption ===
+    # === 1. YOLOv8 + TinyBLIP: sinh caption và detection ===
     captioner = get_captioner()
     caption = captioner.generate_caption(img)
     detailed_caption = captioner.generate_detailed_caption(img)
+    detected_objects = captioner.detect_objects(img)
 
-    # Giải phóng VRAM sau Florence-2
+    # Giải phóng VRAM sau YOLOv8/TinyBLIP
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
     # === 2. TinyLlama: rewrite caption thành 1 câu tiếng Anh ===
     sentences_en = _generate_sentences_from_caption(
-        caption, detailed_caption, target_object
+        caption,
+        detailed_caption,
+        target_object,
+        detected_objects=detected_objects,
     )
 
-    # === 3. Xây dựng vocabulary từ caption ===
-    vocabulary = _extract_vocabulary(caption, target_object)
+    # === 3. Xây dựng vocabulary từ caption + detections ===
+    vocabulary = _extract_vocabulary(caption, target_object, detected_objects)
 
     # === 4. Format kết quả (chỉ tiếng Anh, chưa dịch) ===
     sentences = [{"en": s, "vi": ""} for s in sentences_en]
@@ -160,6 +123,7 @@ async def learn_from_image(
         "vocabulary": vocabulary,
         "caption": caption,
         "detailed_caption": detailed_caption,
+        "objects": detected_objects,
     }
 
 
@@ -198,7 +162,7 @@ async def translate_text(
     return {"translations": sentences_vi}
 
 
-def _extract_vocabulary(caption: str, target_object: str) -> list[dict]:
+def _extract_vocabulary(caption: str, target_object: str, detected_objects: list[dict] | None = None) -> list[dict]:
     """Trích xuất từ vựng từ caption và target object."""
     vocab = []
 
@@ -208,6 +172,23 @@ def _extract_vocabulary(caption: str, target_object: str) -> list[dict]:
             "word": target_object,
             "meaning": f"(đối tượng: {target_object})",
         })
+
+    detected_objects = detected_objects or []
+    seen_detected = set()
+    for obj in detected_objects:
+        label = str(obj.get("label", "")).strip()
+        if not label:
+            continue
+        key = label.lower()
+        if key in seen_detected:
+            continue
+        seen_detected.add(key)
+        vocab.append({
+            "word": label,
+            "meaning": f"(đối tượng phát hiện: {label})",
+        })
+        if len(vocab) >= 8:
+            return vocab
 
     # Thêm một số từ phổ biến từ caption
     common_words = {
